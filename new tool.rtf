@@ -1,0 +1,383 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2869
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 import \{ useState, useEffect \} from "react";\
+import * as XLSX from "xlsx";\
+\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+// CORE UTILITIES\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+\
+const normalizeGST = v => (v||"").toString().trim().toUpperCase().replace(/\\s+/g,"");\
+\
+const normalizeAmt = v => \{\
+if (v===null||v===undefined||v==="") return 0;\
+const n = parseFloat(v.toString().replace(/,/g,"").trim());\
+return isNaN(n) ? 0 : Math.round(n*100)/100;\
+\};\
+\
+const normalizeDate = d => \{\
+if (!d && d!==0) return "";\
+if (typeof d==="number") \{\
+try \{\
+const ms=Math.round((d-25569)864001000);\
+const dt=new Date(ms);\
+if (!isNaN(dt.getTime()))\
+return $\{dt.getUTCFullYear()\}-$\{String(dt.getUTCMonth()+1).padStart(2,"0")\}-$\{String(dt.getUTCDate()).padStart(2,"0")\};\
+\} catch \{\}\
+\}\
+const s=d.toString().trim();\
+const mx=s.match(/^(\\d\{1,2\})/-./-.$/);\
+if (mx)\{ const yr=mx[3].length===2?"20"+mx[3]:mx[3]; return $\{yr\}-$\{mx[2].padStart(2,"0")\}-$\{mx[1].padStart(2,"0")\}; \}\
+if (/^\\d\{4\}-\\d\{2\}-\\d\{2\}/.test(s)) return s.slice(0,10);\
+return s;\
+\};\
+\
+const autoDetect = cols => \{\
+const norm = s => s.toLowerCase().replace(/[\\s_-./\uc0\u57345 \u57345 *#]/g,"");\
+const find = (...kws) => \{\
+for (const kw of kws)\{\
+const k=norm(kw);\
+const hit=cols.find(c=>\{ const cn=norm(String(c)); return cn===k||cn.startsWith(k)||cn.includes(k); \});\
+if (hit) return hit;\
+\}\
+return "";\
+\};\
+return \{\
+gst:          find("gstin","gstno","gstnumber","gstofsupplier","gstofrecipient","suppliergst","gst"),\
+invoiceNo:    find("invoiceno","invoicenumber","billno","billnumber","docno","documentno","voucherno","noteno","creditnoteno","debitnoteno"),\
+invoiceDate:  find("invoicedate","billdate","documentdate","voucherdate","notedate","date"),\
+partyName:    find("partyname","suppliername","tradename","legalname","customername","vendorname","receivername","name"),\
+taxableValue: find("taxablevalue","taxableamount","taxableamt","baseamount","taxable"),\
+igst:         find("igstamount","igstamt","integratedtax","igst"),\
+cgst:         find("cgstamount","cgstamt","centraltax","cgst"),\
+sgst:         find("sgstamount","sgstamt","statetax","utgst","sgst"),\
+invoiceValue: find("invoicevalue","totalinvoicevalue","totalamount","grossamount","invoiceamt","gross","total"),\
+\};\
+\};\
+\
+// Read workbook as raw arrays \'97 user picks header row\
+const parseWorkbook = file => new Promise((res,rej) => \{\
+const reader=new FileReader();\
+reader.onload = e => \{\
+try \{\
+const wb=XLSX.read(e.target.result,\{type:"binary",cellDates:false\});\
+const sheets=wb.SheetNames.map(name=>\{\
+const ws=wb.Sheets[name];\
+const rawRows=XLSX.utils.sheet_to_json(ws,\{header:1,defval:"",raw:true\});\
+const defaultHdr=rawRows.findIndex(r=>r.some(c=>c!==""));\
+return buildSheet(name,rawRows,defaultHdr<0?0:defaultHdr);\
+\});\
+res(\{fileName:file.name,sheets\});\
+\} catch(err)\{ rej(err); \}\
+\};\
+reader.onerror=rej;\
+reader.readAsBinaryString(file);\
+\});\
+\
+function buildSheet(name,rawRows,hdrIdx)\{\
+const raw=(rawRows[hdrIdx]||[]);\
+const headers=raw.map((h,i)=>h!==""?String(h).trim():Column_$\{i+1\});\
+const seen=\{\};\
+const cols=headers.map(h=>\{ seen[h]=(seen[h]||0)+1; return seen[h]>1?$\{h\}_$\{seen[h]\}:h; \});\
+const data=rawRows.slice(hdrIdx+1)\
+.filter(r=>r.some(c=>c!==""))\
+.map(r=>\{ const obj=\{\}; cols.forEach((c,i)=>\{ obj[c]=r[i]!==undefined?r[i]:""; \}); return obj; \});\
+return \{name,rawRows,hdrIdx,cols,data,rowCount:data.length,map:autoDetect(cols),selected:data.length>0\};\
+\}\
+\
+// \uc0\u9472 \u9472  Extract: robust field reading with safe fallback \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \
+const safeGet = (row,col) => \{\
+if (!col||!row) return "";\
+const v=row[col];\
+return v===undefined||v===null?"":v;\
+\};\
+\
+const extractRecs = (data,m,sheetName) => \{\
+return data.map(row=>(\{\
+gst:          String(safeGet(row,m.gst)).trim(),\
+invoiceNo:    String(safeGet(row,m.invoiceNo)).trim(),\
+invoiceDate:  safeGet(row,m.invoiceDate),\
+partyName:    String(safeGet(row,m.partyName)).trim(),\
+taxableValue: safeGet(row,m.taxableValue),\
+igst:         safeGet(row,m.igst),\
+cgst:         safeGet(row,m.cgst),\
+sgst:         safeGet(row,m.sgst),\
+invoiceValue: safeGet(row,m.invoiceValue),\
+_sheet:       sheetName,\
+\})).filter(r =>\
+r.gst || r.invoiceNo ||\
+normalizeAmt(r.taxableValue) || normalizeAmt(r.igst) ||\
+normalizeAmt(r.cgst) || normalizeAmt(r.sgst) || normalizeAmt(r.invoiceValue)\
+);\
+\};\
+\
+// \uc0\u9472 \u9472  Diagnostics: warn about empty key fields \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \u9472 \
+const diagnose = (pool, label) => \{\
+const n=pool.length;\
+if (!n) return [\uc0\u9940  $\{label\}: 0 records extracted \'97 column mapping is likely wrong];\
+const warns=[];\
+const emptyGst=pool.filter(r=>!normalizeGST(r.gst)).length;\
+const emptyInv=pool.filter(r=>!r.invoiceNo).length;\
+const emptyTax=pool.filter(r=>!normalizeAmt(r.taxableValue)).length;\
+if (emptyGst===n) warns.push(\uc0\u9888  $\{label\}: GSTIN is empty for ALL $\{n\} rows \'97 check GSTIN column mapping);\
+else if (emptyGst>n*0.3) warns.push(\uc0\u9888  $\{label\}: $\{emptyGst\}/$\{n\} rows have empty GSTIN);\
+if (emptyInv===n) warns.push(\uc0\u9888  $\{label\}: Invoice No. is empty for ALL rows \'97 check Invoice No. mapping);\
+if (emptyTax===n) warns.push(\uc0\u9888  $\{label\}: Taxable Value is 0 for ALL rows \'97 check Taxable Value mapping);\
+return warns;\
+\};\
+\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+// RECONCILIATION ENGINE\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+\
+const amtClose = (a,b,tol=2) => Math.abs(a-b)<=tol;\
+\
+function reconcile(A,B)\{\
+const out=[];\
+const usedB=new Set();\
+const findB=pred=>\{ for(let i=0;i<B.length;i++) if(!usedB.has(i)&&pred(B[i])) return \{r:B[i],i\}; return null; \};\
+\
+// Decide whether to use GST matching based on data availability\
+const anyGstA=A.some(r=>normalizeGST(r.gst).length>0);\
+const anyGstB=B.some(r=>normalizeGST(r.gst).length>0);\
+const useGst=anyGstA&&anyGstB;\
+\
+for (const a of A)\{\
+const gA   = normalizeGST(a.gst);\
+const taxA = normalizeAmt(a.taxableValue);\
+const igA  = normalizeAmt(a.igst);\
+const cgA  = normalizeAmt(a.cgst);\
+const sgA  = normalizeAmt(a.sgst);\
+const invA = (a.invoiceNo||"").toString().trim().toUpperCase().replace(/\\s+/g,"");\
+const dtA  = normalizeDate(a.invoiceDate);\
+const ivA  = normalizeAmt(a.invoiceValue)||taxA+igA+cgA+sgA;\
+\
+// gOk: if both sides have GST data, require match; otherwise skip the check  \
+const gOk = b => \{  \
+  if (!useGst) return true;  \
+  const gB=normalizeGST(b.gst);  \
+  return gA&&gB&&gA===gB;  \
+\};  \
+const iOk = b => \{  \
+  if (!invA) return false;  \
+  return (b.invoiceNo||"").toString().trim().toUpperCase().replace(/\\s+/g,"")===invA;  \
+\};  \
+const aOk = b =>  \
+  amtClose(normalizeAmt(b.taxableValue),taxA)&&  \
+  amtClose(normalizeAmt(b.igst),igA)&&  \
+  amtClose(normalizeAmt(b.cgst),cgA)&&  \
+  amtClose(normalizeAmt(b.sgst),sgA);  \
+const dOk = b => \{ const d=normalizeDate(b.invoiceDate); return dtA&&d&&d===dtA; \};  \
+\
+let f;  \
+\
+// T1 \'97 PERFECT: GST + Invoice No + all amounts  \
+f=findB(b=>gOk(b)&&iOk(b)&&aOk(b));  \
+if(f)\{usedB.add(f.i);out.push(\{a,b:f.r,type:"PERFECT",notes:"GSTIN, invoice number & all tax amounts match exactly."\});continue;\}  \
+\
+// T2 \'97 HIGH: GST + all amounts + date (CN/DN \'97 invoice no differs)  \
+f=findB(b=>gOk(b)&&aOk(b)&&dOk(b));  \
+if(f)\{usedB.add(f.i);out.push(\{a,b:f.r,type:"HIGH",notes:`GSTIN, all amounts & date match \'97 invoice nos. differ ($\{a.invoiceNo||"\'97"\} vs $\{f.r.invoiceNo||"\'97"\}). Classic CN/DN mismatch.`\});continue;\}  \
+\
+// T3 \'97 PROBABLE: GST + all amounts (date differs \'97 period/amendment)  \
+f=findB(b=>gOk(b)&&aOk(b));  \
+if(f)\{usedB.add(f.i);out.push(\{a,b:f.r,type:"MEDIUM_AMT",notes:`GSTIN & amounts match \'97 date differs ($\{a.invoiceDate||"?"\} vs $\{f.r.invoiceDate||"?"\}). Different period or amendment.`\});continue;\}  \
+\
+// T4 \'97 TAX MISMATCH: GST + taxable + date  \
+f=findB(b=>gOk(b)&&dOk(b)&&amtClose(normalizeAmt(b.taxableValue),taxA));  \
+if(f)\{  \
+  const di=(normalizeAmt(f.r.igst)-igA).toFixed(2),dc=(normalizeAmt(f.r.cgst)-cgA).toFixed(2),ds=(normalizeAmt(f.r.sgst)-sgA).toFixed(2);  \
+  usedB.add(f.i);  \
+  out.push(\{a,b:f.r,type:"MEDIUM_TAX",notes:`GSTIN, taxable & date match \'97 tax differs. \uc0\u916 IGST:\u8377 $\{di\} \u916 CGST:\u8377 $\{dc\} \u916 SGST:\u8377 $\{ds\}`\});  \
+  continue;  \
+\}  \
+\
+// T5 \'97 WEAK: GST + invoice total  \
+f=findB(b=>\{  \
+  const bIV=normalizeAmt(b.invoiceValue)||normalizeAmt(b.taxableValue)+normalizeAmt(b.igst)+normalizeAmt(b.cgst)+normalizeAmt(b.sgst);  \
+  return gOk(b)&&amtClose(bIV,ivA,5);  \
+\});  \
+if(f)\{usedB.add(f.i);out.push(\{a,b:f.r,type:"LOW",notes:"GSTIN & invoice total only match \'97 other fields differ. Manual check."\});continue;\}  \
+\
+out.push(\{a,b:null,type:"UNMATCHED_A",notes:"No matching record found on Side B."\});\
+\
+\}\
+B.forEach((b,i)=>\{ if(!usedB.has(i)) out.push(\{a:null,b,type:"UNMATCHED_B",notes:"No matching record found on Side A."\}); \});\
+return out;\
+\}\
+\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+// EXPORT\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+\
+const MATCH_LABELS=\{PERFECT:"Perfect Match",HIGH:"High Confidence (CN/DN)",MEDIUM_AMT:"Probable \'97 Date Differs",MEDIUM_TAX:"Tax Amount Mismatch",LOW:"Weak Match",UNMATCHED_A:"Only in Books",UNMATCHED_B:"Only in Portal"\};\
+\
+function exportXLSX(results,lA,lB)\{\
+const fa=v=>normalizeAmt(v)||"";\
+const rows=results.map((r,i)=>(\{\
+"#":i+1,"Match Type":MATCH_LABELS[r.type]||r.type,\
+[[$\{lA\}] Sheet]:r.a?._sheet||"", [[$\{lA\}] GSTIN]:r.a?.gst||"", [[$\{lA\}] Invoice No.]:r.a?.invoiceNo||"",\
+[[$\{lA\}] Date]:r.a?.invoiceDate||"", [[$\{lA\}] Party]:r.a?.partyName||"",\
+[[$\{lA\}] Taxable]:r.a?fa(r.a.taxableValue):"", [[$\{lA\}] IGST]:r.a?fa(r.a.igst):"",\
+[[$\{lA\}] CGST]:r.a?fa(r.a.cgst):"", [[$\{lA\}] SGST]:r.a?fa(r.a.sgst):"",\
+[[$\{lB\}] Sheet]:r.b?._sheet||"", [[$\{lB\}] GSTIN]:r.b?.gst||"", [[$\{lB\}] Invoice No.]:r.b?.invoiceNo||"",\
+[[$\{lB\}] Date]:r.b?.invoiceDate||"", [[$\{lB\}] Party]:r.b?.partyName||"",\
+[[$\{lB\}] Taxable]:r.b?fa(r.b.taxableValue):"", [[$\{lB\}] IGST]:r.b?fa(r.b.igst):"",\
+[[$\{lB\}] CGST]:r.b?fa(r.b.cgst):"", [[$\{lB\}] SGST]:r.b?fa(r.b.sgst):"",\
+"\uc0\u916  Taxable":r.a&&r.b?+(normalizeAmt(r.b.taxableValue)-normalizeAmt(r.a.taxableValue)).toFixed(2):"",\
+"\uc0\u916  IGST":r.a&&r.b?+(normalizeAmt(r.b.igst)-normalizeAmt(r.a.igst)).toFixed(2):"",\
+"\uc0\u916  CGST":r.a&&r.b?+(normalizeAmt(r.b.cgst)-normalizeAmt(r.a.cgst)).toFixed(2):"",\
+"\uc0\u916  SGST":r.a&&r.b?+(normalizeAmt(r.b.sgst)-normalizeAmt(r.a.sgst)).toFixed(2):"",\
+"Remarks":r.notes,\
+\}));\
+const wb2=XLSX.utils.book_new();\
+const ws=XLSX.utils.json_to_sheet(rows);\
+ws["!cols"]=Object.keys(rows[0]||\{\}).map(k=>(\{wch:Math.max(k.length+2,14)\}));\
+XLSX.utils.book_append_sheet(wb2,ws,"Reconciliation");\
+const sumRows=Object.entries(MATCH_LABELS).map(([t,l])=>\{\
+const recs=results.filter(r=>r.type===t);\
+return \{"Match Type":l,"Count":recs.length,\
+[Taxable ($\{lA\})]:recs.filter(r=>r.a).reduce((s,r)=>s+normalizeAmt(r.a.taxableValue),0).toFixed(2),\
+[Taxable ($\{lB\})]:recs.filter(r=>r.b).reduce((s,r)=>s+normalizeAmt(r.b.taxableValue),0).toFixed(2)\};\
+\});\
+XLSX.utils.book_append_sheet(wb2,XLSX.utils.json_to_sheet(sumRows),"Summary");\
+XLSX.writeFile(wb2,GST_Recon_$\{new Date().toISOString().slice(0,10)\}.xlsx);\
+\}\
+\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+// CONSTANTS & CONFIG\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+\
+const STD_FIELDS=[\
+\{key:"gst",          label:"GSTIN / GST Number",       required:true \},\
+\{key:"invoiceNo",    label:"Invoice / Document Number", required:true \},\
+\{key:"invoiceDate",  label:"Invoice Date",              required:false\},\
+\{key:"partyName",    label:"Party / Trade Name",        required:false\},\
+\{key:"taxableValue", label:"Taxable Value",             required:false\},\
+\{key:"igst",         label:"IGST Amount",               required:false\},\
+\{key:"cgst",         label:"CGST Amount",               required:false\},\
+\{key:"sgst",         label:"SGST / UTGST Amount",       required:false\},\
+\{key:"invoiceValue", label:"Invoice Value / Total",     required:false\},\
+];\
+\
+const MATCH_CFG=\{\
+PERFECT:    \{label:"Perfect Match",   bg:"#dcfce7",border:"#16a34a",text:"#14532d",dot:"#16a34a"\},\
+HIGH:       \{label:"High Confidence", bg:"#d1fae5",border:"#059669",text:"#064e3b",dot:"#059669"\},\
+MEDIUM_AMT: \{label:"Probable Match",  bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04"\},\
+MEDIUM_TAX: \{label:"Tax Mismatch",    bg:"#ffedd5",border:"#d97706",text:"#7c2d12",dot:"#d97706"\},\
+LOW:        \{label:"Weak Match",      bg:"#fee2e2",border:"#dc2626",text:"#7f1d1d",dot:"#dc2626"\},\
+UNMATCHED_A:\{label:"Only in Books",   bg:"#fce7f3",border:"#db2777",text:"#831843",dot:"#db2777"\},\
+UNMATCHED_B:\{label:"Only in Portal",  bg:"#dbeafe",border:"#2563eb",text:"#1e3a8a",dot:"#2563eb"\},\
+\};\
+\
+const PAGE_SIZE=50;\
+\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+// STYLES\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+\
+const S=\{\
+app:   \{fontFamily:"'IBM Plex Mono','Consolas',monospace",background:"#f1f5f9",minHeight:"100vh",color:"#0f172a"\},\
+hdr:   \{background:"#0f172a",padding:"13px 24px",display:"flex",alignItems:"center",gap:12\},\
+ico:   \{width:32,height:32,background:"#1d4ed8",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0\},\
+wrap:  \{maxWidth:1440,margin:"0 auto",padding:"20px 18px"\},\
+card:  \{background:"#fff",borderRadius:10,border:"1px solid #e2e8f0",padding:"18px 20px",marginBottom:14\},\
+lbl:   \{display:"block",fontSize:10,fontWeight:700,color:"#64748b",marginBottom:4,letterSpacing:"0.07em",textTransform:"uppercase"\},\
+inp:   \{width:"100%",padding:"7px 10px",border:"1px solid #cbd5e1",borderRadius:6,fontSize:12,color:"#0f172a",background:"#f8fafc",outline:"none",boxSizing:"border-box"\},\
+sel:   \{width:"100%",padding:"7px 10px",border:"1px solid #cbd5e1",borderRadius:6,fontSize:12,color:"#0f172a",background:"#fff",outline:"none",cursor:"pointer",boxSizing:"border-box"\},\
+btn:   (bg,fg,ex=\{\})=>(\{padding:"7px 14px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,background:bg,color:fg,...ex\}),\
+th:    (bg="#f1f5f9")=>(\{padding:"7px 8px",textAlign:"left",fontSize:9,fontWeight:700,color:"#475569",background:bg,borderBottom:"2px solid #e2e8f0",whiteSpace:"nowrap",letterSpacing:"0.06em",textTransform:"uppercase"\}),\
+td:    (m=false)=>(\{padding:"5px 8px",fontSize:11,borderBottom:"1px solid #f1f5f9",color:m?"#94a3b8":"#334155",whiteSpace:"nowrap",fontStyle:m?"italic":"normal"\}),\
+diffTd:v=>\{const n=parseFloat(v),c=Math.abs(n)<2?"#16a34a":"#dc2626";return\{padding:"5px 8px",fontSize:11,borderBottom:"1px solid #f1f5f9",color:n===0?"#94a3b8":c,fontWeight:Math.abs(n)>=2?700:400,whiteSpace:"nowrap",textAlign:"right"\};\},\
+badge: t=>(\{display:"inline-flex",alignItems:"center",padding:"2px 6px",borderRadius:4,fontSize:9,fontWeight:700,background:MATCH_CFG[t]?.bg,color:MATCH_CFG[t]?.text,border:1px solid $\{MATCH_CFG[t]?.border\},whiteSpace:"nowrap"\}),\
+\};\
+\
+const amtFmt=v=>\{const n=normalizeAmt(v);if(!n)return"\'97";return n.toLocaleString("en-IN",\{minimumFractionDigits:2,maximumFractionDigits:2\});\};\
+const cellStr=v=>v===null||v===undefined||v===""?"":String(v).trim().slice(0,30);\
+\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+// DATA PREVIEW MODAL\
+// \uc0\u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \u9552 \
+\
+function PreviewModal(\{poolA, poolB, lA, lB, warnings, onConfirm, onBack\})\{\
+const fields=["gst","invoiceNo","invoiceDate","partyName","taxableValue","igst","cgst","sgst"];\
+const labels=["GSTIN","Invoice No.","Date","Party","Taxable","IGST","CGST","SGST"];\
+\
+const PreviewTable=(\{pool,label,accent\})=>(\
+<div style=\{\{flex:1,minWidth:300\}\}>\
+<div style=\{\{display:"flex",alignItems:"center",gap:8,marginBottom:10\}\}>\
+<div style=\{\{width:22,height:22,borderRadius:4,background:accent,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"\}\}>\{label[0]\}</div>\
+<div style=\{\{fontWeight:700,fontSize:13\}\}>\{label\}</div>\
+<span style=\{\{fontSize:11,color:pool.length>0?"#16a34a":"#dc2626",fontWeight:700,marginLeft:"auto"\}\}>\
+\{pool.length.toLocaleString()\} records extracted\
+</span>\
+</div>\
+\{pool.length===0\
+? <div style=\{\{background:"#fee2e2",borderRadius:8,padding:"14px 16px",fontSize:12,color:"#7f1d1d"\}\}>\
+\uc0\u9940  No records extracted. Go back and check: (1) correct header row selected, (2) GSTIN \u9733  and Invoice No. \u9733  are mapped, (3) the correct sheet is selected.\
+</div>\
+: <div style=\{\{overflowX:"auto",borderRadius:8,border:"1px solid #e2e8f0"\}\}>\
+<table style=\{\{width:"100%",borderCollapse:"collapse"\}\}>\
+<thead>\
+<tr>\
+<th style=\{\{...S.th(),width:24\}\}>#</th>\
+<th style=\{S.th("#fffbeb")\}>Sheet</th>\
+\{labels.map(l=><th key=\{l\} style=\{S.th()\}>\{l\}</th>)\}\
+</tr>\
+</thead>\
+<tbody>\
+\{pool.slice(0,8).map((r,i)=>(\
+<tr key=\{i\} style=\{\{background:i%2?"#fafafa":"#fff"\}\}>\
+<td style=\{\{...S.td(true),width:24,fontSize:9\}\}>\{i+1\}</td>\
+<td style=\{\{...S.td(false),fontSize:9,color:accent,fontWeight:600\}\}>\{r._sheet||""\}</td>\
+\{fields.map(f=>(\
+<td key=\{f\} style=\{\{...S.td(!r[f]),fontSize:10,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis"\}\}>\
+\{cellStr(f==="taxableValue"||f==="igst"||f==="cgst"||f==="sgst"\
+? (normalizeAmt(r[f])||"\'97")\
+: (r[f]||"\'97"))\}\
+</td>\
+))\}\
+</tr>\
+))\}\
+</tbody>\
+</table>\
+\{pool.length>8&&<div style=\{\{padding:"6px 10px",fontSize:10,color:"#94a3b8",borderTop:"1px solid #f1f5f9"\}\}>...and \{pool.length-8\} more rows</div>\}\
+</div>\
+\}\
+</div>\
+);\
+\
+return (\
+<div style=\{\{position:"fixed",inset:0,background:"rgba(15,23,42,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:16\}\}>\
+<div style=\{\{background:"#fff",borderRadius:14,width:"100%",maxWidth:1100,maxHeight:"90vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,.35)"\}\}>\
+<div style=\{\{padding:"18px 22px",borderBottom:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:10\}\}>\
+<span style=\{\{fontSize:20\}\}>\uc0\u55357 \u56589 </span>\
+<div style=\{\{flex:1\}\}>\
+<div style=\{\{fontWeight:800,fontSize:15\}\}>Data Preview \'97 verify before running</div>\
+<div style=\{\{fontSize:11,color:"#64748b",marginTop:2\}\}>Check that the right data is being extracted from each side. If something looks wrong, go back and fix the column mapping.</div>\
+</div>\
+</div>\
+\
+<div style=\{\{padding:"18px 22px"\}\}>  \
+      \{/* Warnings */\}  \
+      \{warnings.length>0&&(  \
+        <div style=\{\{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"12px 14px",marginBottom:16\}\}>  \
+          <div style=\{\{fontWeight:700,fontSize:11,color:"#78350f",marginBottom:6\}\}>\uc0\u9888  Issues detected \'97 please review:</div>  \
+          \{warnings.map((w,i)=><div key=\{i\} style=\{\{fontSize:11,color:"#92400e",marginBottom:3\}\}>\'95 \{w\}</div>)\}  \
+        </div>  \
+      )\}  \
+\
+      \{/* Preview tables side by side */\}  \
+      <div style=\{\{display:"flex",gap:20,flexWrap:"wrap"\}\}>  \
+        <PreviewTable pool=\{poolA\} label=\{lA\} accent="#1d4ed8"/>  \
+        <PreviewTable pool=\{poolB\} label=\{lB\} accent="#0891b2"/>  \
+      </div>  \
+\
+      \{/* GSTIN comparison spot-check */\}  \
+      \{poolA.length>0&&poolB.length>0&&(()=>\{  \
+        const sampleA=normal}
